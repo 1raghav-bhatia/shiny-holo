@@ -1,0 +1,12 @@
+name: holocaust_data
+title: holocaust_data
+username: 1raghavbhatia
+account: 1raghavbhatia
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11663416
+bundleId: 8452542
+url: https://1raghavbhatia.shinyapps.io/holocaust_data/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
