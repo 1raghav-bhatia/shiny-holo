@@ -1,9 +1,9 @@
 ---
-title: "Predicting the 2023 NFL season EPA"
-subtitle: "The Impact of Past Performance on Future EPA"
+title: "Depicting the Casualty Figures of the Holocaust"
+subtitle: "A discourse on the ethics behind the data"
 author: 
   - Raghav Bhatia
-thanks: "Code and data are available at: https://github.com/1raghav-bhatia/nfl-analytics.git"
+thanks: "Code and shinyapp are available at: https://github.com/1raghav-bhatia/shiny-holo.git, https://1raghavbhatia.shinyapps.io/holocaust_data/"
 date: April 2, 2024
 date-format: long
 toc: true
@@ -17,153 +17,25 @@ bibliography: references.bib
 #| warning: false
 #| message: false
 
-library(boot)
-library(broom.mixed)
-library(collapse)
-library(dataverse)
-library(janitor)
-library(knitr)
-library(marginaleffects)
-library(modelsummary)
-library(rstanarm)
+library(shiny)
 library(tidyverse)
-library(readr)
-library(here)
-library(kableExtra)
-library(arrow)
-library(nflverse)
-library(tidymodels)
-library(ggrepel)
-
-### Reading the Data ###
-
-nfl_data <- read_csv("data/cleaned_data/qb_regular_season_data.csv")
-current_season_nfl_data <- read_csv("data/cleaned_data/qb_regular_current_season_data.csv")
-
-### Reading the Model ###
-
-epa_prediction_model <- readRDS(file = here("models/epa_prediction_model.rds"))
-```
-
-
-# Dataset Construction
-
-To build a prediction model which aims to predict team wise EPA for the remainder of the 2023 season, we need to use factors which have some explanatory power. The model we've constructed uses factors such as Air Yards/Attempt, Sack Rate, DAKOTA, and weeks 1-9 EPA in order to predict the EPA for weeks 10-18. The reasons why each factor has explanatory power is the following:
-
-1. Air Yards/Attempt : This factor gives the average depth on each pass. It indicates whether a team prefers plays with a higher or lower depth. Higher depth plays are considered riskier, thereby leading to either more yards gained and a higher positive EPA, or more interceptions and a negative lower EPA. On the other hand, lower depth plays are safer and therefore lead to smaller positive/negative EPA values. This measure can be great in explaining variability in EPA across teams depending on whether they make riskier or safer plays.
-
-2. Sack Rate: The sack rate indicates poor QB performance and lower overall EPA due to interceptions. How often a QB gets sacked can be a great predictor of EPA as it leads to a big decrease in its value. 
-
-3. DAKOTA: This is a composite metric which has CPOE (Completed passes over expectation) as a major component. CPOE is a count of the number of passes completed adjusted for the difficulty of the pass. A high CPOE indicates that a team made much harder passes than expected, increasing the EPA. DAKOTA takes CPOE along with certain other EPA predicting components into account in order to give a good predictor of EPA. 
-
-4. EPA Prior (Weeks 1-9 EPA): This gives the average EPA for the first half of the season. It can be a good predictor of the EPA for the second half as it gives the trajectory a team is on in the current season. 
-
-We use the load_player_stats dataset from the nflverse [@citenflverse] library to retrieve data on the above factors. The data is grouped by team and season, and averages are taken for each variable for each team and season. The season data used to train the model was from the 2018-2022 dataset. This subset of the dataset was specifically used because the time period is very recent while at the same time we have 160 observations to use while training, reducing model bias significantly. 
-
-We use the first half of the 2023 dataset as inputs into our trained model in order to predict the EPA for the remaining season.
-
-
-# Model
-
-## Model set-up
-
-In this section, we specify the model and use it on the 2023 dataset in order to get predictions for team wise EPA. 
-
-### Model Specifications ###
-
-The model used in this analysis is a multi-linear regression model. The variables along with their distributions are given as below:
-
-\begin{align}
-\text{future EPA}_i|\mu_i &\sim \mbox{Normal}(\mu_i, \sigma_i) \\
-\mu_i &=  \beta_0 \, + \, \beta_1 \times \text{air yards per attempt}_i 
-\, + \, \beta_2 \times \text{sack rate}_i \, +  \, \beta_3 \times \text{dakota}_i \\
-&\quad \, + \, \beta_4 \times \text{EPA prior}_i \\
-\beta_0 &\sim \text{Normal}(0, 2.5) \\
-\beta_1 &\sim \text{Normal}(0, 2.5) \\
-\beta_2 &\sim \text{Normal}(0, 2.5) \\
-\beta_3 &\sim \text{Normal}(0, 2.5) \\
-\beta_4 &\sim \text{Normal}(0, 2.5)
-\end{align} 
-
-where:
-
-1. $\text{future EPA}$ is the predicted EPA for team i for weeks 10-18
-2. $\mu_i$ is the expected future EPA given respondent $i$
-3. $\mbox{Normal}(\mu_i, \sigma_i)$ is the Normal Distribution with parameters $\mu_i$ and $\sigma_i$
-4. $\text{air yards per attempt}_i$ is the $i^\text{th}$ teams air yards per attempt.
-5. $\text{sack rate}_i$  is the $i^\text{th}$ teams sack rate.
-6. $\text{dakota}_i$ is the $i^\text{th}$ teams Dakota.
-8. $\text{EPA prior}_i$ is the $i^\text{th}$ teams average EPA from the weeks 1-9.
-9. $\beta_0$ is the intercept of the multi-linear regression equation.
-10. $\beta_1$ is the coefficient of the air yards per attempt variable.
-11. $\beta_2$ is the coefficient of the sack rate variable.
-12. $\beta_3$ is the coefficient of the dakota variable.
-13. $\beta_4$ is the coefficient of the EPA prior variable.
-
-#### Model Predictions ####
-
-The above model is regressed on the data for the regular season for each team from 2018-22. From out estimated model, we can now use it alongwith the 2023 dataset with only weeks 1-9 data to predict the EPA for weeks 10-18 by team. The table with the models predictions for the EPA is given below:
-
-```{r}
-#| echo: false
-#| warning: false
-#| message: false
-#| label: tbl-EPA-predictions
-#| tbl-cap: Team wise predictions for Future EPA
-
-library(broom.mixed)
-library(knitr)
-library(kableExtra)
-
-predictions <- epa_prediction_model |>
-  predict(new_data = current_season_nfl_data)
-
-predicted_dataset <- cbind(current_season_nfl_data, predictions) |>
-  mutate(EPA_future = .pred) |>
-  select(-.pred)
-
-cbind(current_season_nfl_data, predictions) |>
-  select(-season) |>
-  kable(col.names = c(
-    "Team", "Air Yards", "Sack Rate", "DAKOTA", "Prior EPA", "Predicted EPA"
-    ), digits = 2)
-
-```
-
-We also construct plot predicted EPA against prior EPA to show the predicted improvement or decline in each teams EPA:
-
-```{r}
-#| echo: false
-#| warning: false
-#| message: false
-#| label: fig-EPA-predictions
-#| fig-cap: Prior EPA against Predicted EPA
-
 library(ggplot2)
-library(nflverse)
-library(ggrepel)
+library(readr)
 
-ggplot(data = predicted_dataset, aes(x = EPA_prior,
-                                     y = EPA_future)) +
-  geom_hline(yintercept = mean(predicted_dataset$EPA_future),
-             color = "black", size = 0.8, linetype = "dashed") +
-  geom_vline(xintercept = mean(predicted_dataset$EPA_prior),
-             color = "black", size = 0.8, linetype = "dashed") +
-  geom_point(size = 3.5, color = "blue") +
-  scale_x_continuous(breaks = scales::pretty_breaks(),
-                     labels = scales::comma_format()) +
-  scale_y_continuous(breaks = scales::pretty_breaks(),
-                     labels = scales::comma_format()) +
-  geom_text_repel(aes(label = recent_team),
-                       fontface = "bold", size = 3.5) +
-  xlab("Current EPA") +
-  ylab("Future Predicted EPA") +
-  labs(title = "**Current EPA vs. Future Predicted**",
-       subtitle = "2023 Regular Season")
 ```
 
-The plot shows that on average most teams will increase their EPA while the relative difference won't be very different from the current EPA. Some teams such as LAC and HOU are predicted to see a big decline in their EPA while teams such as ARI and GB are predicted to see a big improvement.
 
+# Essay
+
+The holocaust is one of the most painful periods of human history. It lead to countless deaths and enumerable families losing their loved ones due to its atrocities. While today we can access the records of victims and casualties of the Holocaust and study their plight within detention camps, we must recognize that these records are but a small measurement of the victims' total suffering. 
+
+We start by recognizing the need to study the casualty data in order to paint a picture of what happened in these camps. While incomplete, the data record of casualties is the best possible piece of information we have to quantify the injustice of the holocaust. This data gives us information about victim nationality and religion, thereby pinpointing the regions that were most targeted by the holocaust. This gives us a good indication of the regions worst affected by the holocaust, thereby helping the descendants of holocaust victims figure out the fate of their great-grandparents. The obvious fact that much of this data comes from Nazi war records does indicate that it could be incomplete or only contain facts which the Nazis required for their purposes. Despite that, this data is the most accurate record of the victims, and therefore can provide immense value for the descendants of Holocaust victims.
+
+While collecting data on the casualties within Auschwitz, its important to realize that while it might provide valuable insights into the severity of the Holocaust by location, it does reduce the stories of millions of victims to simply their casualty status. While providing the casualty data, we've probably used the very same data that the Nazi's used, albeit for a different purpose. The fact that we are looking at the same data points and using the same mathematical and statistical techniques which reduce deaths to data points is indicative of the fact that we are obscuring a lot of information about the victims in question. In line with [@citeBouie], we have to consider how our tools abstract away the humane aspects of the data, and the "extent to which the tools of abstraction are themselves tied up in the history" of the Holocaust. 
+
+It is important to emphasize that the data we are using does abstract away much of the suffering suffered by the victims. Studies which may use the data to quantify the suffering of Auschwitz on the basis of number of deaths by region will completely miss the fact that the data was collected by the Nazi regime and will definitely omit aspects related to true suffering. We do not know how much suffering is hidden away by the lack of data on victims, but we do recognize that alternative sources such as victim's families testimonies need to be taken into account while collecting any amount of data about the victim.
+
+In closing, we note that while data about victims of the Holocaust opens up a new frontier in research within the "digital humanities", overuse of the data to make wild assertions will lead to a miss-representation of the plight of victims. The data needs to be used knowing that much of it was just aspects recorded by the Nazi regime, and aspects actually relating to human plight was deliberately omitted as the regime had no use for it.
 
 \newpage
 
